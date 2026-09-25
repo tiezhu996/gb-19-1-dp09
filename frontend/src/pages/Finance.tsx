@@ -15,10 +15,13 @@ import {
   InputNumber,
   Tabs,
   Radio,
+  Tag,
+  Alert,
 } from 'antd'
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
-import { paymentApi, studentApi, courseApi } from '@/services/api'
+import { paymentApi, studentApi, courseApi, refundApi, RefundQuota } from '@/services/api'
+import { useUserStore } from '@/store/userStore'
 
 const { Title } = Typography
 const { Option } = Select
@@ -34,7 +37,19 @@ const paymentMethods = [
 const paymentTypes = [
   { value: 'tuition', label: '学费' },
   { value: 'deposit', label: '定金' },
+  { value: 'refund', label: '退费' },
   { value: 'other', label: '其他' },
+]
+
+const paymentStatuses = [
+  { value: 'paid', label: '已缴费', color: 'green' },
+  { value: 'refunded', label: '已退费', color: 'orange' },
+]
+
+const refundStatuses = [
+  { value: 'pending', label: '待审批', color: 'gold' },
+  { value: 'approved', label: '已同意', color: 'green' },
+  { value: 'rejected', label: '已驳回', color: 'red' },
 ]
 
 function Finance() {
@@ -47,6 +62,16 @@ function Finance() {
   const [selectedPayment, setSelectedPayment] = useState<any>(null)
   const [form] = Form.useForm()
 
+  const [refunds, setRefunds] = useState<any[]>([])
+  const [refundLoading, setRefundLoading] = useState(false)
+  const [refundModalVisible, setRefundModalVisible] = useState(false)
+  const [quotas, setQuotas] = useState<RefundQuota[]>([])
+  const [selectedQuota, setSelectedQuota] = useState<RefundQuota | null>(null)
+  const [refundForm] = Form.useForm()
+
+  const user = useUserStore((s) => s.user)
+  const canProcess = user?.role === 'admin'
+
   const fetchPayments = async () => {
     try {
       setLoading(true)
@@ -56,6 +81,18 @@ function Finance() {
       console.error('Fetch payments error:', error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const fetchRefunds = async () => {
+    try {
+      setRefundLoading(true)
+      const res: any = await refundApi.list()
+      setRefunds(res || [])
+    } catch (error) {
+      console.error('Fetch refunds error:', error)
+    } finally {
+      setRefundLoading(false)
     }
   }
 
@@ -74,6 +111,7 @@ function Finance() {
 
   useEffect(() => {
     fetchPayments()
+    fetchRefunds()
     fetchOptions()
   }, [])
 
@@ -131,6 +169,54 @@ function Finance() {
     }
   }
 
+  const handleCreateRefund = () => {
+    refundForm.resetFields()
+    setQuotas([])
+    setSelectedQuota(null)
+    setRefundModalVisible(true)
+  }
+
+  const handleRefundStudentChange = async (studentId: number) => {
+    refundForm.setFieldsValue({ course_id: undefined, amount: undefined })
+    setSelectedQuota(null)
+    try {
+      const res: any = await refundApi.quota(studentId)
+      setQuotas(res || [])
+    } catch (error) {
+      console.error('Fetch refund quota error:', error)
+      setQuotas([])
+    }
+  }
+
+  const handleRefundCourseChange = (courseId: number) => {
+    const quota = quotas.find((q) => q.course_id === courseId) || null
+    setSelectedQuota(quota)
+    refundForm.setFieldsValue({ amount: quota?.available || undefined })
+  }
+
+  const handleRefundSubmit = async () => {
+    try {
+      const values = await refundForm.validateFields()
+      await refundApi.create(values)
+      message.success('退费申请已提交，等待财务审批')
+      setRefundModalVisible(false)
+      fetchRefunds()
+    } catch (error) {
+      console.error('Refund submit error:', error)
+    }
+  }
+
+  const handleProcessRefund = async (id: number, status: 'approved' | 'rejected') => {
+    try {
+      await refundApi.process(id, { status })
+      message.success(status === 'approved' ? '已同意退费' : '已驳回，额度已释放')
+      fetchRefunds()
+      fetchPayments()
+    } catch (error) {
+      console.error('Process refund error:', error)
+    }
+  }
+
   const columns = [
     {
       title: '学员',
@@ -148,6 +234,11 @@ function Finance() {
       title: '金额(元)',
       dataIndex: 'amount',
       key: 'amount',
+      render: (amount: number) => (
+        <span style={{ color: amount < 0 ? '#cf1322' : undefined }}>
+          {amount?.toFixed(2)}
+        </span>
+      ),
     },
     {
       title: '支付方式',
@@ -165,6 +256,15 @@ function Finance() {
       render: (type: string) => {
         const opt = paymentTypes.find((o) => o.value === type)
         return opt?.label || type
+      },
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      key: 'status',
+      render: (status: string) => {
+        const opt = paymentStatuses.find((o) => o.value === status)
+        return <Tag color={opt?.color}>{opt?.label || status}</Tag>
       },
     },
     {
@@ -200,6 +300,103 @@ function Finance() {
     },
   ]
 
+  const refundColumns = [
+    {
+      title: '学员',
+      dataIndex: ['student', 'name'],
+      key: 'student',
+      render: (name: string) => name || '-',
+    },
+    {
+      title: '课程',
+      dataIndex: ['course', 'name'],
+      key: 'course',
+      render: (name: string) => name || '-',
+    },
+    {
+      title: '退费金额(元)',
+      dataIndex: 'amount',
+      key: 'amount',
+      render: (amount: number) => (
+        <span style={{ color: '#cf1322' }}>{amount?.toFixed(2)}</span>
+      ),
+    },
+    {
+      title: '原因',
+      dataIndex: 'reason',
+      key: 'reason',
+      render: (reason: string) => reason || '-',
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      key: 'status',
+      render: (status: string) => {
+        const opt = refundStatuses.find((o) => o.value === status)
+        return <Tag color={opt?.color}>{opt?.label || status}</Tag>
+      },
+    },
+    {
+      title: '提单人',
+      dataIndex: ['creator', 'name'],
+      key: 'creator',
+      render: (name: string) => name || '-',
+    },
+    {
+      title: '处理人',
+      dataIndex: ['processor', 'name'],
+      key: 'processor',
+      render: (name: string) => name || '-',
+    },
+    {
+      title: '退费日期',
+      dataIndex: 'refund_date',
+      key: 'refund_date',
+      render: (date: string) => date || '-',
+    },
+    {
+      title: '申请时间',
+      dataIndex: 'created_at',
+      key: 'created_at',
+      render: (time: string) => (time ? dayjs(time).format('YYYY-MM-DD HH:mm') : '-'),
+    },
+    ...(canProcess
+      ? [
+          {
+            title: '操作',
+            key: 'action',
+            render: (_: any, record: any) =>
+              record.status === 'pending' ? (
+                <Space size="small">
+                  <Popconfirm
+                    title="同意退费?"
+                    description="将生成负数流水、清零该课程剩余课时并标记已退费"
+                    onConfirm={() => handleProcessRefund(record.id, 'approved')}
+                    okText="确定"
+                    cancelText="取消"
+                  >
+                    <Button type="link" size="small">
+                      同意
+                    </Button>
+                  </Popconfirm>
+                  <Popconfirm
+                    title="驳回申请?"
+                    description="驳回后该申请占用的可退额度将被释放"
+                    onConfirm={() => handleProcessRefund(record.id, 'rejected')}
+                    okText="确定"
+                    cancelText="取消"
+                  >
+                    <Button type="link" size="small" danger>
+                      驳回
+                    </Button>
+                  </Popconfirm>
+                </Space>
+              ) : null,
+          },
+        ]
+      : []),
+  ]
+
   return (
     <div>
       <Title level={3} style={{ marginBottom: 24 }}>
@@ -230,6 +427,32 @@ function Finance() {
                   dataSource={payments}
                   rowKey="id"
                   loading={loading}
+                />
+              </Card>
+            ),
+          },
+          {
+            key: 'refunds',
+            label: '退费管理',
+            children: (
+              <Card>
+                <div
+                  style={{
+                    marginBottom: 16,
+                    display: 'flex',
+                    justifyContent: 'flex-end',
+                  }}
+                >
+                  <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateRefund}>
+                    新增退费申请
+                  </Button>
+                </div>
+
+                <Table
+                  columns={refundColumns}
+                  dataSource={refunds}
+                  rowKey="id"
+                  loading={refundLoading}
                 />
               </Card>
             ),
@@ -298,11 +521,13 @@ function Finance() {
             rules={[{ required: true, message: '请选择类型' }]}
           >
             <Select placeholder="请选择类型">
-              {paymentTypes.map((t) => (
-                <Option key={t.value} value={t.value}>
-                  {t.label}
-                </Option>
-              ))}
+              {paymentTypes
+                .filter((t) => t.value !== 'refund')
+                .map((t) => (
+                  <Option key={t.value} value={t.value}>
+                    {t.label}
+                  </Option>
+                ))}
             </Select>
           </Form.Item>
           <Form.Item
@@ -314,6 +539,92 @@ function Finance() {
           </Form.Item>
           <Form.Item name="remarks" label="备注">
             <TextArea rows={2} placeholder="请输入备注" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title="新增退费申请"
+        open={refundModalVisible}
+        onOk={handleRefundSubmit}
+        onCancel={() => setRefundModalVisible(false)}
+        destroyOnClose
+      >
+        <Form form={refundForm} layout="vertical">
+          <Form.Item
+            name="student_id"
+            label="学员"
+            rules={[{ required: true, message: '请选择学员' }]}
+          >
+            <Select placeholder="请选择学员" onChange={handleRefundStudentChange}>
+              {students.map((s) => (
+                <Option key={s.id} value={s.id}>
+                  {s.name}
+                </Option>
+              ))}
+            </Select>
+          </Form.Item>
+          <Form.Item
+            name="course_id"
+            label="退费课程"
+            rules={[{ required: true, message: '请选择课程' }]}
+          >
+            <Select
+              placeholder="请选择课程"
+              onChange={handleRefundCourseChange}
+              notFoundContent="该学员没有在读课程"
+            >
+              {quotas.map((q) => (
+                <Option key={q.course_id} value={q.course_id} disabled={q.available <= 0}>
+                  {q.course_name}（可退 ¥{q.available.toFixed(2)}）
+                </Option>
+              ))}
+            </Select>
+          </Form.Item>
+          {selectedQuota && (
+            <Alert
+              style={{ marginBottom: 16 }}
+              type="info"
+              showIcon
+              message={
+                `剩余课时 ${selectedQuota.remaining_hours} × 单价 ¥${selectedQuota.price_per_hour.toFixed(2)}` +
+                ` = 最多可退 ¥${selectedQuota.max_refund.toFixed(2)}` +
+                (selectedQuota.occupied > 0
+                  ? `，审批中申请已占用 ¥${selectedQuota.occupied.toFixed(2)}`
+                  : '') +
+                `，当前可退上限 ¥${selectedQuota.available.toFixed(2)}`
+              }
+            />
+          )}
+          <Form.Item
+            name="amount"
+            label="退费金额(元)"
+            rules={[
+              { required: true, message: '请输入退费金额' },
+              {
+                validator: (_, value) => {
+                  if (value === undefined || value === null) return Promise.resolve()
+                  if (value <= 0) return Promise.reject(new Error('退费金额必须大于0'))
+                  if (selectedQuota && value > selectedQuota.available) {
+                    return Promise.reject(
+                      new Error(`超出可退上限 ¥${selectedQuota.available.toFixed(2)}`),
+                    )
+                  }
+                  return Promise.resolve()
+                },
+              },
+            ]}
+          >
+            <InputNumber
+              style={{ width: '100%' }}
+              min={0.01}
+              max={selectedQuota?.available}
+              precision={2}
+              placeholder="请输入退费金额"
+            />
+          </Form.Item>
+          <Form.Item name="reason" label="退费原因">
+            <TextArea rows={2} placeholder="请输入退费原因" />
           </Form.Item>
         </Form>
       </Modal>

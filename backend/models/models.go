@@ -72,7 +72,7 @@ type StudentCourse struct {
 	RemainingHours int     `json:"remaining_hours" gorm:"-"`
 	StartDate    *time.Time `json:"start_date"`
 	EndDate      *time.Time `json:"end_date"`
-	Status       int       `json:"status" gorm:"default:1"`
+	Status       int       `json:"status" gorm:"default:1"` // 1:在读 2:已退费
 }
 
 type Course struct {
@@ -151,12 +151,19 @@ type Payment struct {
 type Refund struct {
 	BaseModel
 	StudentID   uint      `json:"student_id" gorm:"index;not null"`
+	CourseID    uint      `json:"course_id" gorm:"index;not null"`
 	PaymentID   uint      `json:"payment_id" gorm:"index;not null"`
 	Amount      float64   `json:"amount" gorm:"type:decimal(10,2);not null"`
 	Reason      string    `json:"reason" gorm:"type:text"`
-	Status      string    `json:"status" gorm:"size:20;default:pending"`
+	Status      string    `json:"status" gorm:"size:20;default:pending"` // pending:待审批 approved:已同意 rejected:已驳回
 	RefundDate  *string   `json:"refund_date" gorm:"size:10"`
+	CreatedBy   *uint     `json:"created_by" gorm:"index"`
 	ProcessedBy *uint     `json:"processed_by" gorm:"index"`
+	Student     *Student  `json:"student,omitempty" gorm:"foreignKey:StudentID"`
+	Course      *Course   `json:"course,omitempty" gorm:"foreignKey:CourseID"`
+	Payment     *Payment  `json:"payment,omitempty" gorm:"foreignKey:PaymentID"`
+	Creator     *User     `json:"creator,omitempty" gorm:"foreignKey:CreatedBy"`
+	Processor   *User     `json:"processor,omitempty" gorm:"foreignKey:ProcessedBy"`
 }
 
 type Performance struct {

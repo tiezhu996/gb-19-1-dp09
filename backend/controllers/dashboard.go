@@ -35,10 +35,11 @@ func GetDashboardStats(c *gin.Context) {
 	database.DB.Model(&models.Student{}).Where("created_at >= ?", currentMonthStartStr).Count(&newStudentsCount)
 	stats["new_students_count"] = newStudentsCount
 
+	// 当月收入按净额统计：学费收入含已退费记录，退费负数流水自动抵扣
 	var totalIncome float64
 	database.DB.Model(&models.Payment{}).
 		Select("COALESCE(SUM(amount), 0)").
-		Where("status = ? AND type = ? AND payment_date >= ?", "paid", "tuition", currentMonthStartStr).
+		Where("status IN ? AND type IN ? AND payment_date >= ?", []string{"paid", "refunded"}, []string{"tuition", "refund"}, currentMonthStartStr).
 		Scan(&totalIncome)
 	stats["total_income"] = totalIncome
 
