@@ -162,6 +162,7 @@ export interface Payment {
   status?: string
   receipt_no?: string
   remarks?: string
+  refund_id?: number
 }
 
 export const paymentApi = {
@@ -173,10 +174,31 @@ export const paymentApi = {
   reports: (params?: any) => get('/finance/reports', params),
 }
 
+export interface RefundQuota {
+  student_id: number
+  course_id: number
+  total_hours: number
+  used_hours: number
+  remaining_hours: number
+  price_per_hour: number
+  max_refund_amount: number
+  pending_amount: number
+  available_amount: number
+  refunded: boolean
+}
+
 export const refundApi = {
-  list: () => get('/refunds'),
-  create: (data: any) => post('/refunds', data),
-  process: (id: number, data: { status: string }) =>
+  list: (params?: any) => get('/refunds', params),
+  quota: (studentId: number, courseId: number) =>
+    get<RefundQuota>('/refunds/quota', { student_id: studentId, course_id: courseId }),
+  create: (data: {
+    student_id: number
+    course_id: number
+    payment_id?: number
+    amount: number
+    reason?: string
+  }) => post('/refunds', data),
+  process: (id: number, data: { status: 'approved' | 'rejected' }) =>
     post(`/refunds/${id}/process`, data),
 }
 

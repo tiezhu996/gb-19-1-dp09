@@ -148,6 +148,7 @@ func main() {
 	refunds := api.Group("/refunds")
 	{
 		refunds.GET("", controllers.GetRefunds)
+		refunds.GET("/quota", controllers.GetRefundQuota)
 		refunds.POST("", controllers.CreateRefund)
 		refunds.POST("/:id/process", controllers.ProcessRefund)
 	}
